@@ -1,0 +1,15 @@
+RUN_EXERCISE3
+
+First run
+sudo ./setup.sh
+
+
+2) make clean && make
+
+3) sudo ./zookld
+
+4) sudo ./demonstrate.sh
+
+After killing zookld run: sudo ./cleanup_mounts.sh 
+
+Or restart system and run 1 to 4 again.

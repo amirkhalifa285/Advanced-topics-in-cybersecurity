@@ -1,0 +1,163 @@
+═══════════════════════════════════════════════════════════════════
+        STACK LAYOUT FOR process_client() - reqpath BUFFER
+═══════════════════════════════════════════════════════════════════
+
+Function: process_client(int fd)
+Location: zookd.c, lines 99-119
+Vulnerable Buffer: char reqpath[4096]  (stack-allocated)
+Vulnerable Function: url_decode() in http.c
+
+
+HIGH MEMORY ADDRESS (Top of Stack)
+▲
+│
+│  ┌────────────────────────────────────────────────┐
+│  │  SAVED RIP (Return Address)                    │
+│  │  Points back to: run_server()                  │  8 bytes
+│  │  ★ TARGET FOR EXPLOIT ★                        │
+│  ├────────────────────────────────────────────────┤
+│  │  SAVED RBP (Frame Pointer)                     │  8 bytes
+│  ├────────────────────────────────────────────────┤
+│  │  Other saved registers                         │  ~48 bytes
+│  ├────────────────────────────────────────────────┤
+│  │  const char *errmsg                            │  8 bytes
+│  │  (pointer to error message)                    │
+│  ├────────────────────────────────────────────────┤
+│  │                                                 │
+│  │  char reqpath[4096]                            │
+│  │  ★ VULNERABLE BUFFER ★                         │  4096 bytes
+│  │                                                 │
+│  │  [0] [1] [2] ... [4095]                       │
+│  │                                                 │
+│  │  Filled by: url_decode(reqpath, url_path)     │
+│  │  url_decode() has NO BOUNDS CHECK!            │
+│  │                                                 │
+│  │  When we send 8000 'A's:                      │
+│  │  - Bytes 0-4095: Fill reqpath buffer          │
+│  │  - Bytes 4096+: OVERFLOW into stack above!    │
+│  │                                                 │
+│  ├────────────────────────────────────────────────┤
+│  │  static size_t env_len (value)                │  8 bytes
+│  ├────────────────────────────────────────────────┤
+│  │  int fd (parameter)                            │  4 bytes
+│  └────────────────────────────────────────────────┘
+│
+▼
+LOW MEMORY ADDRESS (stack grows downward)
+
+═══════════════════════════════════════════════════════════════════
+
+MEMORY LAYOUT DURING OVERFLOW:
+──────────────────────────────
+
+BEFORE url_decode() call:
+  reqpath[4096]: [uninitialized garbage data....................]
+  errmsg:        [some pointer value]
+  saved regs:    [legitimate register values]
+  saved RBP:     [legitimate frame pointer]
+  saved RIP:     [address in run_server() to return to]
+
+
+DURING url_decode() with 8000 'A's:
+  reqpath[4096]: [AAAAAAAAAAAAAAAAAAAAAAAAAAAA...] ← Bytes 0-4095
+  OVERFLOW:      [AAAAAAAAAAA...]                 ← Bytes 4096-8000
+                  ↓ overwrites everything above!
+  errmsg:        [AAAAAAAA] = 0x4141414141414141  ← Corrupted!
+  saved regs:    [AAAAAAAA] = 0x4141414141414141  ← Corrupted!
+  saved RBP:     [AAAAAAAA] = 0x4141414141414141  ← Corrupted!
+  saved RIP:     [AAAAAAAA] = 0x4141414141414141  ← Corrupted!
+
+
+AFTER url_decode() returns:
+  - process_client() tries to continue execution
+  - May try to use 'errmsg' pointer → CRASH (invalid address)
+  - Or tries to call another function → CRASH (corrupted stack)
+  - Or tries to return to caller → CRASH (RIP = 0x4141414141414141)
+  
+RESULT: General Protection Fault (signal 11)
+
+═══════════════════════════════════════════════════════════════════
+
+EXPLOIT PAYLOAD STRUCTURE (exploit-2.py):
+──────────────────────────────────────────
+
+┌─────────────────────────────────────────────────────────────────┐
+│  'A' repeated 8000 times                                        │
+│                                                                  │
+│  Bytes 0-4095:    Fill reqpath buffer completely               │
+│  Bytes 4096-8000: Overflow and corrupt stack                   │
+│                   - Overwrites local variables                  │
+│                   - Overwrites saved registers                  │
+│                   - Overwrites saved RBP                        │
+│                   - Overwrites saved RIP                        │
+└─────────────────────────────────────────────────────────────────┘
+
+HTTP Request:
+  GET /AAAA...[8000 A's]...AAAA HTTP/1.0\r\n\r\n
+
+Python code:
+  payload = b"A" * 8000
+  request = b"GET /" + payload + b" HTTP/1.0\r\n\r\n"
+
+═══════════════════════════════════════════════════════════════════
+
+WHY THIS WORKS:
+───────────────
+
+1. NO LENGTH CHECK before url_decode()
+   - http_request_line() doesn't validate URL length
+   - Just passes it directly to url_decode()
+
+2. url_decode() has NO BOUNDS CHECK
+   void url_decode(char *dst, const char *src) {
+       for (;;) {
+           *dst = *src;  // ← No check if dst is full!
+           dst++;        // ← Keeps incrementing!
+       }
+   }
+
+3. Stack is writable
+   - All local variables are on stack
+   - No stack canaries (compiled with -fno-stack-protector)
+   - No ASLR (addresses are predictable)
+
+4. Overflow is MASSIVE
+   - 8000 bytes into 4096-byte buffer
+   - 3904 bytes of overflow!
+   - Guaranteed to corrupt return address
+   - Impossible to miss!
+
+═══════════════════════════════════════════════════════════════════
+
+
+CALL STACK AT TIME OF CRASH:
+─────────────────────────────
+
+main()
+  └─→ run_server()
+       └─→ accept()
+            └─→ fork()
+                 └─→ [CHILD PROCESS]
+                      └─→ process_client()      ← Stack frame we overflow
+                           └─→ http_request_line()
+                                └─→ url_decode()  ← Overflow happens here!
+                                     [Writes 8000 bytes]
+                                     [Corrupts stack]
+                                ←── Returns
+                           ←── Tries to continue
+                           💥 CRASH! (Invalid memory access)
+
+═══════════════════════════════════════════════════════════════════
+
+KEY INSIGHT:
+────────────
+
+The vulnerability is in url_decode(), but the BUFFER being overflowed
+is reqpath[4096] in the CALLER function (process_client).
+
+This is a classic example of a vulnerable utility function (url_decode)
+causing a buffer overflow in its caller's stack frame.
+
+The lesson: ALWAYS validate buffer bounds, even in utility functions!
+
+═══════════════════════════════════════════════════════════════════

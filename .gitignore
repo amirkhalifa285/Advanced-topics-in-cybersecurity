@@ -1,0 +1,101 @@
+# Compiled binaries and object files
+*.o
+*.out
+*.exe
+*.so
+*.a
+*.dylib
+zookd
+zookfs
+zookd-exstack
+zookd-nxstack
+http-server
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# Secure keys and sensitive data
+*_secure_keys/
+auth_secure_keys/
+bank_secure_keys/
+*.key
+*.pem
+*.crt
+secrets.txt
+pass.txt
+
+# Service runtime directories
+authsvc/
+banksvc/
+*.sock
+
+# System directories (chroot environment files)
+bin/
+lib/
+lib64/
+etc/
+run/
+usr/
+var/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+zoobar/zoodb/
+
+# Logs
+*.log
+*.log.*
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Core dumps
+core
+core.*
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.sublime-*
+.project
+.settings/
+
+# Backup files
+*.bak
+*.backup
+
+# Test output
+test-output/
+coverage/
+.coverage
+
+# Shell script logs
+demonstrate.log
+cleanup.log
+
+# AI/LLM generated documentation (keep your own work only)
+GEMINI.md
+CLAUDE.md

