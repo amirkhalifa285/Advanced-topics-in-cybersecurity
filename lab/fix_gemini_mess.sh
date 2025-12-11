@@ -1,6 +1,4 @@
 #!/bin/bash
-# Fix script for Gemini's mess
-# Run this with: sudo ./fix_gemini_mess.sh
 
 set -e  # Exit on error
 
